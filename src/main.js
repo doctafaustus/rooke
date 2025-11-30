@@ -24,18 +24,28 @@ class GameScene extends Phaser.Scene {
     // Create a simple town background (black ground)
     this.add.rectangle(0, 0, 1024, 768, 0x000000).setOrigin(0);
 
-    // Add some simple town elements (houses)
-    const house1 = this.add.image(100, 100, 'house');
+    // Create static physics group for houses
+    this.houses = this.physics.add.staticGroup();
+
+    const house1 = this.houses.create(100, 100, 'house');
     house1.setScale(0.3);
+    house1.refreshBody();
 
-    const house2 = this.add.image(600, 100, 'house');
+    const house2 = this.houses.create(600, 100, 'house');
     house2.setScale(0.25);
+    house2.refreshBody();
 
-    const house3 = this.add.image(350, 400, 'house');
+    const house3 = this.houses.create(350, 400, 'house');
     house3.setScale(0.25);
+    house3.refreshBody();
 
-    // Create player (blue square)
+    // Create player (blue square) with physics
     this.player = this.add.rectangle(512, 384, 32, 32, 0x3498db);
+    this.physics.add.existing(this.player);
+    this.player.body.setCollideWorldBounds(true);
+
+    // Add collision between player and houses
+    this.physics.add.collider(this.player, this.houses);
 
     // Create NPC cat using the loaded image
     this.cat = this.add.image(200, 300, 'cat');
@@ -83,29 +93,21 @@ class GameScene extends Phaser.Scene {
       return;
     }
 
-    // Player movement
-    const speed = 6;
-    let moved = false;
+    // Player movement with physics
+    const speed = 320;
+    this.player.body.setVelocity(0);
 
     if (this.cursors.left.isDown || this.wasd.left.isDown) {
-      this.player.x -= speed;
-      moved = true;
+      this.player.body.setVelocityX(-speed);
     } else if (this.cursors.right.isDown || this.wasd.right.isDown) {
-      this.player.x += speed;
-      moved = true;
+      this.player.body.setVelocityX(speed);
     }
 
     if (this.cursors.up.isDown || this.wasd.up.isDown) {
-      this.player.y -= speed;
-      moved = true;
+      this.player.body.setVelocityY(-speed);
     } else if (this.cursors.down.isDown || this.wasd.down.isDown) {
-      this.player.y += speed;
-      moved = true;
+      this.player.body.setVelocityY(speed);
     }
-
-    // Keep player in bounds
-    this.player.x = Phaser.Math.Clamp(this.player.x, 16, 1008);
-    this.player.y = Phaser.Math.Clamp(this.player.y, 16, 752);
 
     // Check if player is near cat and presses space
     const distanceToCat = Phaser.Math.Distance.Between(
@@ -140,6 +142,13 @@ const config = {
   width: 1024,
   height: 768,
   backgroundColor: '#000',
+  physics: {
+    default: 'arcade',
+    arcade: {
+      gravity: { y: 0 },
+      debug: false,
+    },
+  },
   scene: [GameScene],
   parent: 'game-container',
 };
