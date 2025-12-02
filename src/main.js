@@ -1,57 +1,88 @@
 import './style.css';
 import Phaser from 'phaser';
 
-// Game scene
 class GameScene extends Phaser.Scene {
   constructor() {
     super({ key: 'GameScene' });
+
     this.player = null;
     this.cat = null;
     this.cursors = null;
+
     this.dialogBox = null;
     this.dialogText = null;
     this.isShowingDialog = false;
+
+    this.walls = null;
+    this.pit = null;
   }
 
   preload() {
-    // Load the cat image
     this.load.image('cat', '/cat.png');
-    // Load the house image
     this.load.image('house', '/house.png');
+    this.load.image('level1', '/cave.jpg'); // your map art
+    this.load.spritesheet('rooke', '/char-rooke-sprite-sheet.png', {
+      frameWidth: 64,
+      frameHeight: 64,
+    });
   }
 
   create() {
-    // Create a simple town background (black ground)
-    this.add.rectangle(0, 0, 1024, 768, 0x000000).setOrigin(0);
+    // 🗺️ Background map
+    this.add.image(0, 0, 'level1').setOrigin(0).setDepth(-10);
 
-    // Create static physics group for houses
-    this.houses = this.physics.add.staticGroup();
+    // 🧭 Click-to-log coordinates
+    this.input.on('pointerdown', (pointer) => {
+      console.log(`Clicked at x=${pointer.x}, y=${pointer.y}`);
+    });
 
-    const house1 = this.houses.create(100, 100, 'house');
-    house1.setScale(0.3);
-    house1.refreshBody();
-
-    const house2 = this.houses.create(600, 100, 'house');
-    house2.setScale(0.25);
-    house2.refreshBody();
-
-    const house3 = this.houses.create(350, 400, 'house');
-    house3.setScale(0.25);
-    house3.refreshBody();
-
-    // Create player (blue square) with physics
-    this.player = this.add.rectangle(512, 384, 32, 32, 0x3498db);
+    // 🧍 Player FIRST
+    this.player = this.add.sprite(512, 380, 'rooke', 0);
     this.physics.add.existing(this.player);
     this.player.body.setCollideWorldBounds(true);
 
-    // Add collision between player and houses
-    this.physics.add.collider(this.player, this.houses);
+    // Create animations for 8 directions
+    if (!this.anims.exists('down')) {
+      this.anims.create({ key: 'down', frames: [{ key: 'rooke', frame: 0 }], frameRate: 10 });
+      this.anims.create({ key: 'down-right', frames: [{ key: 'rooke', frame: 1 }], frameRate: 10 });
+      this.anims.create({ key: 'right', frames: [{ key: 'rooke', frame: 2 }], frameRate: 10 });
+      this.anims.create({ key: 'up-right', frames: [{ key: 'rooke', frame: 3 }], frameRate: 10 });
+      this.anims.create({ key: 'up', frames: [{ key: 'rooke', frame: 4 }], frameRate: 10 });
+      this.anims.create({ key: 'up-left', frames: [{ key: 'rooke', frame: 5 }], frameRate: 10 });
+      this.anims.create({ key: 'left', frames: [{ key: 'rooke', frame: 6 }], frameRate: 10 });
+      this.anims.create({ key: 'down-left', frames: [{ key: 'rooke', frame: 7 }], frameRate: 10 });
+    }
 
-    // Create NPC cat using the loaded image
-    this.cat = this.add.image(200, 300, 'cat');
-    this.cat.setScale(0.2); // Adjust scale if needed
+    // 🐱 NPC cat
+    this.cat = this.add.image(200, 300, 'cat').setScale(0.2);
 
-    // Create dialog box (hidden initially)
+    // 🚧 Walls
+    this.walls = this.physics.add.staticGroup();
+
+    const makeWall = (x, y, w, h) => {
+      const r = this.add.rectangle(x, y, w, h, 0xff0000, 0.25); // visible for debug
+      this.physics.add.existing(r, true); // static body
+      this.walls.add(r);
+      return r;
+    };
+
+    // rough guesses – tune with the coordinate logger
+    makeWall(512, 60, 900, 120); // top
+    makeWall(70, 384, 140, 650); // left
+    makeWall(512, 740, 900, 120); // bottom
+    makeWall(960, 350, 150, 500); // right
+
+    // Player collides with walls
+    this.physics.add.collider(this.player, this.walls);
+
+    // 🕳️ Pit area
+    this.pit = this.add.rectangle(780, 580, 380, 260, 0x00ff00, 0.25); // visible for now
+    this.physics.add.existing(this.pit, true);
+
+    // Player overlap → fall in
+    this.physics.add.overlap(this.player, this.pit, this.handlePit, null, this);
+
+    // 💬 Dialog box
     this.dialogBox = this.add.rectangle(512, 680, 600, 100, 0x000000, 0.8);
     this.dialogBox.setStrokeStyle(2, 0xffffff);
     this.dialogBox.setVisible(false);
@@ -65,7 +96,7 @@ class GameScene extends Phaser.Scene {
       .setOrigin(0.5);
     this.dialogText.setVisible(false);
 
-    // Enable keyboard input
+    // 🎮 Input
     this.cursors = this.input.keyboard.createCursorKeys();
     this.spaceKey = this.input.keyboard.addKey(
       Phaser.Input.Keyboard.KeyCodes.SPACE
@@ -77,39 +108,96 @@ class GameScene extends Phaser.Scene {
       right: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.D),
     };
 
-    // Add instructions
-    this.add.text(10, 10, 'Arrow keys or WASD to move\nSpace to talk to cat', {
-      fontSize: '16px',
-      color: '#333333',
+    this.add.text(
+      10,
+      10,
+      'Click anywhere to log coordinates.\nWASD/Arrows to move.\nSpace to talk to cat.',
+      {
+        fontSize: '16px',
+        color: '#ffffff',
+      }
+    );
+  }
+
+  handlePit() {
+    // Check if already falling to prevent multiple triggers
+    if (this.player.isFalling) return;
+    this.player.isFalling = true;
+
+    // Store current velocity direction for forward fall
+    const velocityX = this.player.body.velocity.x;
+    const velocityY = this.player.body.velocity.y;
+
+    // Disable physics body
+    this.player.body.enable = false;
+
+    // Simple forward fall into pit
+    this.tweens.add({
+      targets: this.player,
+      x: this.player.x + velocityX, // Keep moving forward
+      y: this.player.y + velocityY + 200, // Fall downward into pit
+      scaleX: 0.3, // Shrink to simulate distance
+      scaleY: 0.3,
+      alpha: 0, // Fade out
+      duration: 1000,
+      ease: 'Linear',
+      onComplete: () => {
+        this.scene.restart();
+      },
     });
   }
 
   update() {
     if (this.isShowingDialog) {
-      // Close dialog with space
       if (Phaser.Input.Keyboard.JustDown(this.spaceKey)) {
         this.hideDialog();
       }
       return;
     }
 
-    // Player movement with physics
-    const speed = 320;
+    const speed = 380;
     this.player.body.setVelocity(0);
+
+    let moveX = 0;
+    let moveY = 0;
 
     if (this.cursors.left.isDown || this.wasd.left.isDown) {
       this.player.body.setVelocityX(-speed);
+      moveX = -1;
     } else if (this.cursors.right.isDown || this.wasd.right.isDown) {
       this.player.body.setVelocityX(speed);
+      moveX = 1;
     }
 
     if (this.cursors.up.isDown || this.wasd.up.isDown) {
       this.player.body.setVelocityY(-speed);
+      moveY = -1;
     } else if (this.cursors.down.isDown || this.wasd.down.isDown) {
       this.player.body.setVelocityY(speed);
+      moveY = 1;
     }
 
-    // Check if player is near cat and presses space
+    // Update sprite frame based on direction
+    if (moveX !== 0 || moveY !== 0) {
+      if (moveY === -1 && moveX === 0) {
+        this.player.setFrame(4); // up
+      } else if (moveY === 1 && moveX === 0) {
+        this.player.setFrame(0); // down
+      } else if (moveX === -1 && moveY === 0) {
+        this.player.setFrame(6); // left
+      } else if (moveX === 1 && moveY === 0) {
+        this.player.setFrame(2); // right
+      } else if (moveY === -1 && moveX === -1) {
+        this.player.setFrame(5); // up-left
+      } else if (moveY === -1 && moveX === 1) {
+        this.player.setFrame(3); // up-right
+      } else if (moveY === 1 && moveX === -1) {
+        this.player.setFrame(7); // down-left
+      } else if (moveY === 1 && moveX === 1) {
+        this.player.setFrame(1); // down-right
+      }
+    }
+
     const distanceToCat = Phaser.Math.Distance.Between(
       this.player.x,
       this.player.y,
@@ -136,7 +224,6 @@ class GameScene extends Phaser.Scene {
   }
 }
 
-// Phaser game configuration
 const config = {
   type: Phaser.AUTO,
   width: 1024,
@@ -153,5 +240,4 @@ const config = {
   parent: 'game-container',
 };
 
-// Create the game
 const game = new Phaser.Game(config);
